@@ -167,6 +167,17 @@ describe("boundary schemas", () => {
         expect(result.data.tokens).toEqual(tokenUsage);
       }
     });
+
+    it("parses a ready event (emitted on every sandbox connect)", () => {
+      const result = sandboxEventSchema.safeParse({
+        type: "ready",
+        sandboxId: "sandbox-1",
+        opencodeSessionId: null,
+        timestamp: 123,
+      });
+
+      expect(result.success).toBe(true);
+    });
   });
 
   describe("clientMessageSchema", () => {
@@ -254,6 +265,61 @@ describe("boundary schemas", () => {
       });
 
       expect(result.success).toBe(true);
+    });
+
+    it("keeps recognized replay events and drops unknown ones without failing", () => {
+      const result = serverMessageSchema.safeParse({
+        type: "subscribed",
+        sessionId: "session-1",
+        state: {
+          id: "session-1",
+          title: null,
+          repoOwner: null,
+          repoName: null,
+          baseBranch: null,
+          branchName: null,
+          status: "completed",
+          sandboxStatus: "stopped",
+          messageCount: 1,
+          createdAt: 123,
+          parentSessionId: null,
+          tunnelUrls: null,
+        },
+        artifacts: [],
+        participantId: "participant-1",
+        replay: {
+          events: [
+            { type: "ready", sandboxId: "sandbox-1", opencodeSessionId: null, timestamp: 1 },
+            { type: "some_future_event", foo: "bar", timestamp: 2 },
+            { type: "token", content: "hi", messageId: "m1", sandboxId: "sandbox-1", timestamp: 3 },
+          ],
+          hasMore: false,
+          cursor: null,
+        },
+        spawnError: null,
+      });
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.replay?.events.map((event) => event.type)).toEqual(["ready", "token"]);
+      }
+    });
+
+    it("keeps recognized history_page items and drops unknown ones without failing", () => {
+      const result = serverMessageSchema.safeParse({
+        type: "history_page",
+        items: [
+          { type: "some_legacy_event", foo: "bar", timestamp: 1 },
+          { type: "git_sync", status: "completed", sandboxId: "sandbox-1", timestamp: 2 },
+        ],
+        hasMore: false,
+        cursor: null,
+      });
+
+      expect(result.success).toBe(true);
+      if (result.success && result.data.type === "history_page") {
+        expect(result.data.items.map((item) => item.type)).toEqual(["git_sync"]);
+      }
     });
 
     it("rejects a malformed partial sandbox event message", () => {
