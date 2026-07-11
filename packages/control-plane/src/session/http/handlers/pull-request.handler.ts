@@ -1,7 +1,10 @@
 import type { SessionArtifact } from "@open-inspect/shared";
 import type { SourceControlAuthContext } from "../../../source-control";
 import type { CreatePullRequestInput, CreatePullRequestResult } from "../../pull-request-service";
-import { applyPullRequestSnapshot, pullRequestSnapshotSchema } from "../../pull-request-snapshot";
+import {
+  preparePullRequestArtifactUpdate,
+  pullRequestSnapshotSchema,
+} from "../../pull-request-snapshot";
 import {
   mapRepositoryTargetError,
   resolveSessionRepositoryTarget,
@@ -41,11 +44,14 @@ export interface PullRequestHandlerDeps {
   updateArtifact: (artifactId: string, data: UpdateArtifactData) => void;
   broadcastArtifactUpdated: (artifact: SessionArtifact) => void;
   now: () => number;
+  /** Kicks off a background read-through refresh. */
+  triggerPullRequestRefresh: () => void;
 }
 
 export interface PullRequestHandler {
   createPr: (request: Request) => Promise<Response>;
   pullRequestArtifactSnapshot: (request: Request, url: URL) => Promise<Response>;
+  refreshPullRequests: () => Response;
 }
 
 export function createPullRequestHandler(deps: PullRequestHandlerDeps): PullRequestHandler {
@@ -131,10 +137,11 @@ export function createPullRequestHandler(deps: PullRequestHandlerDeps): PullRequ
     },
 
     /**
-     * Transport shell for the snapshot projection (design §6): parse the
-     * request, resolve the artifact, and delegate to the canonical
-     * applyPullRequestSnapshot. Stale and materially identical snapshots
-     * answer `{ applied: false }` — no write, no broadcast.
+     * Transport shell for snapshot application (design §6): parse the
+     * request, resolve the artifact, compute the update via the canonical
+     * preparePullRequestArtifactUpdate, and perform the write + broadcast it
+     * prescribes. Stale and materially identical snapshots answer
+     * `{ applied: false }` — no write, no broadcast.
      */
     async pullRequestArtifactSnapshot(request: Request, url: URL): Promise<Response> {
       const artifactId = url.searchParams.get("artifactId");
@@ -159,17 +166,24 @@ export function createPullRequestHandler(deps: PullRequestHandlerDeps): PullRequ
         return Response.json({ error: "Pull request artifact not found" }, { status: 404 });
       }
 
-      const result = applyPullRequestSnapshot(
-        {
-          updateArtifact: deps.updateArtifact,
-          broadcastArtifactUpdated: deps.broadcastArtifactUpdated,
-          now: deps.now,
-        },
-        artifact,
-        parsed.data
-      );
+      const artifactUpdate = preparePullRequestArtifactUpdate(artifact, parsed.data, deps.now());
+      if (!artifactUpdate) {
+        return Response.json({ applied: false });
+      }
 
-      return Response.json(result);
+      deps.updateArtifact(artifact.id, artifactUpdate.update);
+      deps.broadcastArtifactUpdated(artifactUpdate.artifact);
+      return Response.json({ applied: true });
+    },
+
+    /**
+     * Manual sync (design §5.3): fire the read-through refresh in the
+     * background and return immediately — the endpoint never blocks on a
+     * provider read.
+     */
+    refreshPullRequests(): Response {
+      deps.triggerPullRequestRefresh();
+      return Response.json({ status: "refreshing" }, { status: 202 });
     },
   };
 }
