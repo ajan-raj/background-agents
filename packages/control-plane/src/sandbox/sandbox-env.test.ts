@@ -3,7 +3,6 @@ import {
   applyScmCloneEnv,
   buildSandboxEnvVars,
   buildSessionConfig,
-  legacyScmCloneIdentity,
   scmCloneIdentity,
 } from "./sandbox-env";
 import type { CreateSandboxConfig } from "./provider";
@@ -102,30 +101,22 @@ describe("buildSessionConfig", () => {
 });
 
 describe("scmCloneIdentity", () => {
-  it("maps each SCM provider to its clone host and username", () => {
+  it("maps each SCM provider to its clone host, username, and secret hosts", () => {
     expect(scmCloneIdentity("github")).toEqual({
       host: "github.com",
       cloneUsername: "x-access-token",
+      secretHosts: ["github.com", "api.github.com"],
     });
     expect(scmCloneIdentity("gitlab")).toEqual({
       host: "gitlab.com",
       cloneUsername: "oauth2",
+      secretHosts: ["gitlab.com", "api.gitlab.com"],
     });
     expect(scmCloneIdentity("bitbucket")).toEqual({
       host: "bitbucket.org",
       cloneUsername: "x-token-auth",
+      secretHosts: ["bitbucket.org", "api.bitbucket.org"],
     });
-  });
-});
-
-describe("legacyScmCloneIdentity", () => {
-  it("resolves gitlab normally", () => {
-    expect(legacyScmCloneIdentity("gitlab")).toEqual(scmCloneIdentity("gitlab"));
-  });
-
-  it("collapses bitbucket to the GitHub identity (historical pre-Bitbucket behavior)", () => {
-    expect(legacyScmCloneIdentity("bitbucket")).toEqual(scmCloneIdentity("github"));
-    expect(legacyScmCloneIdentity("github")).toEqual(scmCloneIdentity("github"));
   });
 });
 

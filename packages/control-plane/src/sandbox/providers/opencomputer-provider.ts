@@ -25,7 +25,7 @@ import {
   buildSandboxEnvVars,
   deriveCodeServerPassword,
   IMAGE_BUILD_MODE_ENV_VAR,
-  legacyScmCloneIdentity,
+  scmCloneIdentity,
   SESSION_CONFIG_ENV_VAR,
   toRepositoryConfigPayload,
   VCS_CLONE_TOKEN_ENV_VAR,
@@ -468,7 +468,7 @@ export class OpenComputerSandboxProvider implements SandboxProvider {
     const { envVars: baseEnvVars, secretEnvVars } = this.prepareEnvironment(config.userEnvVars);
     const envVars = buildSandboxEnvVars(config, {
       baseEnvVars,
-      scmIdentity: legacyScmCloneIdentity(this.providerConfig.scmProvider),
+      scmIdentity: scmCloneIdentity(this.providerConfig.scmProvider),
       codeServerPassword: config.codeServerEnabled
         ? await deriveCodeServerPassword(
             config.sandboxId,
@@ -532,11 +532,7 @@ export class OpenComputerSandboxProvider implements SandboxProvider {
       [REPO_IMAGE_CALLBACK_ENV_KEYS[4]]: config.failureCallbackUrl,
     });
 
-    applyScmCloneEnv(
-      envVars,
-      legacyScmCloneIdentity(this.providerConfig.scmProvider),
-      config.cloneToken
-    );
+    applyScmCloneEnv(envVars, scmCloneIdentity(this.providerConfig.scmProvider), config.cloneToken);
 
     return environment;
   }
@@ -621,10 +617,14 @@ export class OpenComputerSandboxProvider implements SandboxProvider {
     const normalized = name.toUpperCase();
     if (normalized.includes("ANTHROPIC")) return ["api.anthropic.com"];
     if (normalized.includes("OPENAI")) return ["api.openai.com"];
-    if (normalized.includes("GITHUB") || normalized.includes("VCS_CLONE")) {
-      return this.providerConfig.scmProvider === "gitlab"
-        ? ["gitlab.com", "api.gitlab.com"]
-        : ["github.com", "api.github.com"];
+    // VCS_CLONE_* is the provider-generic clone credential, so it follows the
+    // configured SCM provider; GITHUB-named secrets are GitHub credentials no
+    // matter which provider the deployment clones from.
+    if (normalized.includes("VCS_CLONE")) {
+      return [...scmCloneIdentity(this.providerConfig.scmProvider).secretHosts];
+    }
+    if (normalized.includes("GITHUB")) {
+      return [...scmCloneIdentity("github").secretHosts];
     }
     return undefined;
   }
